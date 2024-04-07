@@ -2,8 +2,8 @@
 Description: HSI Raw image convert to PNG
 Author: Marc-Alexandre Espiaut <ma.dev@espiaut.fr>
 Date Created: 2024-03-22
-Last Modified: 2024-03-26
-Version: 240326
+Last Modified: 2024-04-07
+Version: 240407
 """
 
 # This software was originally written to convert Moto Racer images to PNG.
