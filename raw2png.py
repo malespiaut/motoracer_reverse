@@ -2,8 +2,8 @@
 Description: HSI Raw image convert to PNG
 Author: Marc-Alexandre Espiaut <ma.dev@espiaut.fr>
 Date Created: 2024-03-22
-Last Modified: 2024-04-07
-Version: 240407
+Last Modified: 2024-04-20
+Version: 240420
 """
 
 # This software was originally written to convert Moto Racer images to PNG.
@@ -17,81 +17,65 @@ Version: 240407
 # - http://tex.imm.uran.ru/alchemy.pdf
 
 
-import io
 import logging
-import os
+import struct
 import sys
-import numpy as np
+from pathlib import Path
 from PIL import Image
 
 
-def filename_gen(rawfile_path: str, extension: str) -> str:
-    """This function makes it easier to generate filenames that matches the input file."""
-    # path/file.ext -> file
-    filename: str = os.path.splitext(os.path.basename(rawfile_path))[0]
-
-    return filename + "." + extension
-
-
-def main():
+def main() -> bool:
     """Everything happens here."""
     logging.basicConfig(level=logging.INFO)
 
-    file = None
-    with open(sys.argv[1], "rb") as f:
-        logging.info(f"Storing {sys.argv[1]} in RAM.")
-        file = f.read()
-        f.close()
-
-    with io.BytesIO(file) as r:
-        # Checking is this is a real “mhwanh” file
-        if str(r.read(6), "ascii") == "mhwanh":
-            logging.info("Signature is correct")
-
-            # Jumping directly to the image dimensions.
-            r.seek(0x8)
-
-            # Reading header
-            image_width: int = int.from_bytes(r.read(2), byteorder="big")
-            image_height: int = int.from_bytes(r.read(2), byteorder="big")
-            logging.info(f"Image size: {image_width}x{image_height}")
-
-            palette_colors: int = int.from_bytes(r.read(2), byteorder="big")
-
-            # Jumping directly to the image data.
-            r.seek(0x20)
-
-            if palette_colors != 0:
-                logging.info("This image have a color palette!")
-
-                # Writing palette to a file, and saving it in memory
-                with open(filename_gen(sys.argv[1], "pal"), "wb") as output_palette:
-                    palette: bytes = r.read(768)
-                    output_palette.write(palette)
-                    output_palette.close()
-
-                    # Writing the paletized image
-                    output_image: Image.Image = Image.frombytes(
-                        "P",
-                        (image_width, image_height),
-                        r.read(image_width * image_height),
-                    )
-                    output_image.putpalette(palette)
-                    output_image.save(filename_gen(sys.argv[1], "png"))
-
-            else:
-                logging.info("This image is RGB!")
-
-                # Writing the RGB image
-                Image.fromarray(
-                    np.frombuffer(r.read(), dtype=np.uint8).reshape(
-                        (image_height, image_width, 3)
-                    )
-                ).save(filename_gen(sys.argv[1], "png"))
-
-        else:
+    inpath: str = sys.argv[1]
+    with open(inpath, "rb") as r:
+        # Checking if this is a real “mhwanh” file
+        if r.read(6) != b"mhwanh":
             logging.error("Incorrect signature.")
+            return False
+        logging.info("Signature is correct")
+
+        # Jumping directly to the image dimensions.
+        r.seek(0x8)
+
+        # Reading header (3 × shorts, big endian)
+        image_width, image_height, palette_colors = struct.unpack(">HHH", r.read(6))
+        logging.info(f"Image size: {image_width}×{image_height}")
+
+        # Jumping directly to the image data.
+        r.seek(0x20)
+
+        if palette_colors != 0:
+            logging.info("This image has a color palette!")
+
+            # Load in palette
+            palette: bytes = r.read(768)
+
+            # Write palette to a .pal file
+            palpath: Path = Path(inpath).with_suffix(".pal")
+            with open(palpath, "wb") as output_palette:
+                output_palette.write(palette)
+                logging.info(f"Wrote {palpath}")
+
+            # Load indexed-color image
+            indexed_data: bytes = r.read(image_width * image_height)
+            image = Image.frombytes("P", (image_width, image_height), indexed_data)
+            image.putpalette(palette)
+        else:
+            logging.info("This image is RGB!")
+
+            # Load RGB image
+            rgb_data: bytes = r.read()
+            image = Image.frombuffer("RGB", (image_width, image_height), rgb_data)
+
+    outpath: Path = Path(inpath).with_suffix(".png")
+    image.save(outpath)
+    logging.info(f"Wrote {outpath}")
+    return True
 
 
 if __name__ == "__main__":
-    main()
+    SUCCESS = main()
+    if not SUCCESS:
+        sys.exit(1)
